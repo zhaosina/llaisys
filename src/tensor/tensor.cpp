@@ -6,6 +6,112 @@
 #include <numeric>
 #include <sstream>
 
+namespace {
+size_t numel_from_shape(const std::vector<size_t> &shape) {
+    return std::accumulate(shape.begin(), shape.end(), size_t(1), std::multiplies<size_t>());
+}
+
+bool compute_view_strides(
+    const std::vector<size_t> &old_shape,
+    const std::vector<ptrdiff_t> &old_strides,
+    const std::vector<size_t> &new_shape,
+    std::vector<ptrdiff_t> &new_strides) {
+    new_strides.assign(new_shape.size(), 0);
+    size_t old_numel = numel_from_shape(old_shape);
+    size_t new_numel = numel_from_shape(new_shape);
+    if (old_numel != new_numel) {
+        return false;
+    }
+    if (new_numel == 0) {
+        ptrdiff_t stride = 1;
+        for (size_t i = new_shape.size(); i-- > 0;) {
+            new_strides[i] = stride;
+            stride *= static_cast<ptrdiff_t>(new_shape[i]);
+        }
+        return true;
+    }
+
+    std::vector<size_t> compact_shape;
+    std::vector<ptrdiff_t> compact_strides;
+    compact_shape.reserve(old_shape.size());
+    compact_strides.reserve(old_strides.size());
+    for (size_t i = 0; i < old_shape.size(); i++) {
+        if (old_shape[i] != 1) {
+            compact_shape.push_back(old_shape[i]);
+            compact_strides.push_back(old_strides[i]);
+        }
+    }
+
+    if (compact_shape.empty()) {
+        ptrdiff_t stride = 1;
+        for (size_t i = new_shape.size(); i-- > 0;) {
+            new_strides[i] = stride;
+            stride *= static_cast<ptrdiff_t>(new_shape[i]);
+        }
+        return true;
+    }
+
+    struct Chunk {
+        size_t size;
+        ptrdiff_t stride;
+    };
+
+    std::vector<Chunk> chunks;
+    size_t idx = compact_shape.size();
+    while (idx > 0) {
+        size_t end = idx - 1;
+        size_t chunk_size = compact_shape[end];
+        ptrdiff_t chunk_stride = compact_strides[end];
+        size_t inner_size = compact_shape[end];
+        ptrdiff_t inner_stride = compact_strides[end];
+        while (end > 0) {
+            size_t prev = end - 1;
+            if (compact_strides[prev] == inner_stride * static_cast<ptrdiff_t>(inner_size)) {
+                chunk_size *= compact_shape[prev];
+                inner_size = compact_shape[prev];
+                inner_stride = compact_strides[prev];
+                end = prev;
+            } else {
+                break;
+            }
+        }
+        chunks.push_back({chunk_size, chunk_stride});
+        idx = end;
+    }
+
+    size_t new_i = new_shape.size();
+    for (size_t c = 0; c < chunks.size(); c++) {
+        size_t chunk_size = chunks[c].size;
+        ptrdiff_t base_stride = chunks[c].stride;
+        size_t prod = 1;
+        while (new_i > 0 && prod < chunk_size) {
+            size_t dim = new_i - 1;
+            size_t size = new_shape[dim];
+            new_strides[dim] = base_stride * static_cast<ptrdiff_t>(prod);
+            if (size != 1) {
+                prod *= size;
+            }
+            new_i--;
+        }
+        if (prod != chunk_size) {
+            return false;
+        }
+    }
+
+    while (new_i > 0) {
+        size_t dim = new_i - 1;
+        if (new_shape[dim] != 1) {
+            return false;
+        }
+        ptrdiff_t stride = (dim + 1 < new_shape.size()) ? new_strides[dim + 1] : 1;
+        new_strides[dim] = stride;
+        new_i--;
+    }
+
+    return true;
+}
+}
+
 namespace llaisys {
 
 Tensor::Tensor(TensorMeta meta, core::storage_t storage, size_t offset)
@@ -164,27 +270,76 @@ void Tensor::debug() const {
 }
 
 bool Tensor::isContiguous() const {
-    TO_BE_IMPLEMENTED();
+    if (_meta.shape.empty()) {
+        return true;
+    }
+    if (this->numel() == 0) {
+        return true;
+    }
+    size_t expected = 1;
+    for (size_t i = _meta.shape.size(); i-- > 0;) {
+        if (_meta.shape[i] != 1 && _meta.strides[i] != static_cast<ptrdiff_t>(expected)) {
+            return false;
+        }
+        expected *= _meta.shape[i];
+    }
     return true;
 }
 
 tensor_t Tensor::permute(const std::vector<size_t> &order) const {
-    TO_BE_IMPLEMENTED();
-    return std::shared_ptr<Tensor>(new Tensor(_meta, _storage));
+    CHECK_ARGUMENT(order.size() == this->ndim(), "invalid order");
+    std::vector<size_t> new_shape(order.size());
+    std::vector<ptrdiff_t> new_strides(order.size());
+    std::vector<bool> seen(order.size(), false);
+    for (size_t i = 0; i < order.size(); i++) {
+        size_t dim = order[i];
+        CHECK_ARGUMENT(dim < this->ndim(), "invalid order");
+        CHECK_ARGUMENT(!seen[dim], "invalid order");
+        seen[dim] = true;
+        new_shape[i] = _meta.shape[dim];
+        new_strides[i] = _meta.strides[dim];
+    }
+    TensorMeta meta{_meta.dtype, std::move(new_shape), std::move(new_strides)};
+    return std::shared_ptr<Tensor>(new Tensor(meta, _storage, _offset));
 }
 
 tensor_t Tensor::view(const std::vector<size_t> &shape) const {
-    TO_BE_IMPLEMENTED();
-    return std::shared_ptr<Tensor>(new Tensor(_meta, _storage));
+    size_t new_numel = numel_from_shape(shape);
+    CHECK_ARGUMENT(new_numel == this->numel(), "invalid shape");
+    std::vector<ptrdiff_t> new_strides;
+    CHECK_ARGUMENT(
+        compute_view_strides(this->shape(), this->strides(), shape, new_strides),
+        "incompatible view");
+    TensorMeta meta{_meta.dtype, shape, std::move(new_strides)};
+    return std::shared_ptr<Tensor>(new Tensor(meta, _storage, _offset));
 }
 
 tensor_t Tensor::slice(size_t dim, size_t start, size_t end) const {
-    TO_BE_IMPLEMENTED();
-    return std::shared_ptr<Tensor>(new Tensor(_meta, _storage));
+    CHECK_ARGUMENT(dim < this->ndim(), "invalid dim");
+    CHECK_ARGUMENT(start <= end, "invalid slice range");
+    CHECK_ARGUMENT(end <= _meta.shape[dim], "invalid slice range");
+    TensorMeta meta = _meta;
+    meta.shape[dim] = end - start;
+    size_t new_offset = _offset + start * static_cast<size_t>(_meta.strides[dim]) * this->elementSize();
+    return std::shared_ptr<Tensor>(new Tensor(meta, _storage, new_offset));
 }
 
 void Tensor::load(const void *src_) {
-    TO_BE_IMPLEMENTED();
+    core::context().setDevice(this->deviceType(), this->deviceId());
+    size_t bytes = this->numel() * this->elementSize();
+    if (_storage->isHost()) {
+        core::context().runtime().api()->memcpy_sync(
+            this->data(),
+            src_,
+            bytes,
+            LLAISYS_MEMCPY_H2H);
+    } else {
+        core::context().runtime().api()->memcpy_sync(
+            this->data(),
+            src_,
+            bytes,
+            LLAISYS_MEMCPY_H2D);
+    }
 }
 
 tensor_t Tensor::contiguous() const {
