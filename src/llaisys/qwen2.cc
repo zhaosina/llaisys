@@ -265,7 +265,13 @@ __C {
     }
 
     int64_t llaisysQwen2ModelInfer(struct LlaisysQwen2Model *model, int64_t *token_ids, size_t ntoken) {
-        CHECK_ARGUMENT(model != nullptr, "model is null");
-        return infer_impl(model->impl, token_ids, ntoken);
+        if (model == nullptr || model->impl == nullptr) {
+            return -1;
+        }
+        try {
+            return infer_impl(model->impl, token_ids, ntoken);
+        } catch (...) {
+            return -1;
+        }
     }
 }
