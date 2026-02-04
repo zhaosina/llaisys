@@ -19,7 +19,9 @@ class Tensor:
         device: DeviceType = DeviceType.CPU,
         device_id: int = 0,
         tensor: llaisysTensor_t = None,
+        owning: bool = True,
     ):
+        self._owning = owning
         if tensor:
             self._tensor = tensor
         else:
@@ -34,7 +36,7 @@ class Tensor:
             )
 
     def __del__(self):
-        if hasattr(self, "_tensor") and self._tensor is not None:
+        if getattr(self, "_owning", True) and hasattr(self, "_tensor") and self._tensor is not None:
             LIB_LLAISYS.tensorDestroy(self._tensor)
             self._tensor = None
 
