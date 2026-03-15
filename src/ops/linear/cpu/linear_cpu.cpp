@@ -23,14 +23,27 @@ constexpr size_t kMTile = 4;
 constexpr size_t kNTile = 64;
 constexpr size_t kKTile = 256;
 
+bool read_env_flag(const char *name) {
+#ifdef _MSC_VER
+    char *env = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&env, &len, name) != 0 || env == nullptr) {
+        return false;
+    }
+    const bool enabled = env[0] == '1' || env[0] == 'y' || env[0] == 'Y' || env[0] == 't' || env[0] == 'T';
+    free(env);
+    return enabled;
+#else
+    const char *env = std::getenv(name);
+    if (env == nullptr) {
+        return false;
+    }
+    return env[0] == '1' || env[0] == 'y' || env[0] == 'Y' || env[0] == 't' || env[0] == 'T';
+#endif
+}
+
 bool use_legacy_linear() {
-    static const bool enabled = []() {
-        const char *env = std::getenv("LLAISYS_LINEAR_USE_LEGACY");
-        if (env == nullptr) {
-            return false;
-        }
-        return env[0] == '1' || env[0] == 'y' || env[0] == 'Y' || env[0] == 't' || env[0] == 'T';
-    }();
+    static const bool enabled = read_env_flag("LLAISYS_LINEAR_USE_LEGACY");
     return enabled;
 }
 
