@@ -1,6 +1,8 @@
 #pragma once
 #include "../core/llaisys_core.hpp"
 
+#include <memory>
+#include <mutex>
 #include <vector>
 namespace llaisys {
 class Tensor;
@@ -17,6 +19,8 @@ private:
     TensorMeta _meta;
     core::storage_t _storage;
     size_t _offset;
+    mutable std::shared_ptr<std::vector<float>> _packed_linear_f32;
+    mutable std::mutex _packed_linear_mutex;
     Tensor(TensorMeta meta, core::storage_t storage, size_t offset = 0);
 
 public:
@@ -50,6 +54,7 @@ public:
 
     // Load data from host memory
     void load(const void *src);
+    const float *getOrCreatePackedLinearF32() const;
 
     // Challenging features
     tensor_t contiguous() const;

@@ -2,6 +2,9 @@
 
 #include "../../core/llaisys_core.hpp"
 #include "../../utils.hpp"
+#ifdef ENABLE_NVIDIA_API
+#include "nvidia/embedding_nvidia.cuh"
+#endif
 
 #include <cstring>
 
@@ -40,7 +43,7 @@ void embedding(tensor_t out, tensor_t index, tensor_t weight) {
         }
 #ifdef ENABLE_NVIDIA_API
     case LLAISYS_DEVICE_NVIDIA:
-        TO_BE_IMPLEMENTED();
+        return nvidia::embedding(out, index, weight);
         return;
 #endif
     default:

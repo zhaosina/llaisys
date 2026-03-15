@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../../tensor/tensor.hpp"
+#include "../../../tensor/tensor.hpp"
 
-namespace llaisys::ops {
+namespace llaisys::ops::nvidia {
 void rms_norm(tensor_t out, tensor_t in, tensor_t weight, float eps);
 void qwen_rms_norm(tensor_t out, tensor_t in, tensor_t weight, float eps);
 }

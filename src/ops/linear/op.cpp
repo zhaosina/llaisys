@@ -3,91 +3,45 @@
 #include "../../core/llaisys_core.hpp"
 #include "../../utils.hpp"
 
-#include <cmath>
+#include "cpu/linear_cpu.hpp"
+#ifdef ENABLE_NVIDIA_API
+#include "nvidia/linear_nvidia.cuh"
+#endif
 
 namespace llaisys::ops {
-template <typename T>
-void linear_cpu(T *out, const T *in, const T *weight, const T *bias, size_t m, size_t n, size_t k) {
-    for (size_t i = 0; i < m; i++) {
-        for (size_t j = 0; j < n; j++) {
-            float acc = 0.0f;
-            if (bias != nullptr) {
-                acc = utils::cast<float>(bias[j]);
-            }
-            const T *in_row = in + i * k;
-            const T *w_row = weight + j * k;
-            for (size_t t = 0; t < k; t++) {
-                acc += utils::cast<float>(in_row[t]) * utils::cast<float>(w_row[t]);
-            }
-            out[i * n + j] = utils::cast<T>(acc);
-        }
-    }
-}
-
 void linear(tensor_t out, tensor_t in, tensor_t weight, tensor_t bias) {
-    
+    CHECK_SAME_DEVICE(out, in, weight);
+    if (bias) {
+        CHECK_SAME_DEVICE(out, bias);
+    }
+    CHECK_SAME_DTYPE(out->dtype(), in->dtype(), weight->dtype());
+    if (bias) {
+        CHECK_SAME_DTYPE(out->dtype(), bias->dtype());
+    }
+
+    CHECK_ARGUMENT(out->ndim() == 2, "Linear: output tensor must be 2D.");
+    CHECK_ARGUMENT(in->ndim() == 2, "Linear: input tensor must be 2D.");
+    CHECK_ARGUMENT(weight->ndim() == 2, "Linear: weight tensor must be 2D.");
+    CHECK_ARGUMENT(out->shape()[0] == in->shape()[0], "Linear: output rows must match input rows.");
+    CHECK_ARGUMENT(out->shape()[1] == weight->shape()[0], "Linear: output cols must match weight rows.");
+    CHECK_ARGUMENT(in->shape()[1] == weight->shape()[1], "Linear: input cols must match weight cols.");
+    if (bias) {
+        CHECK_ARGUMENT(bias->ndim() == 1, "Linear: bias tensor must be 1D.");
+        CHECK_ARGUMENT(bias->shape()[0] == weight->shape()[0], "Linear: bias length must match output cols.");
+    }
+
     if (out->deviceType() == LLAISYS_DEVICE_CPU) {
-        size_t m = out->shape()[0];
-        size_t n = out->shape()[1];
-        size_t k = in->shape()[1];
-        switch (out->dtype()) {
-        case LLAISYS_DTYPE_F32:
-            return linear_cpu(reinterpret_cast<float *>(out->data()),
-                              reinterpret_cast<const float *>(in->data()),
-                              reinterpret_cast<const float *>(weight->data()),
-                              bias ? reinterpret_cast<const float *>(bias->data()) : nullptr,
-                              m, n, k);
-        case LLAISYS_DTYPE_F16:
-            return linear_cpu(reinterpret_cast<fp16_t *>(out->data()),
-                              reinterpret_cast<const fp16_t *>(in->data()),
-                              reinterpret_cast<const fp16_t *>(weight->data()),
-                              bias ? reinterpret_cast<const fp16_t *>(bias->data()) : nullptr,
-                              m, n, k);
-        case LLAISYS_DTYPE_BF16:
-            return linear_cpu(reinterpret_cast<bf16_t *>(out->data()),
-                              reinterpret_cast<const bf16_t *>(in->data()),
-                              reinterpret_cast<const bf16_t *>(weight->data()),
-                              bias ? reinterpret_cast<const bf16_t *>(bias->data()) : nullptr,
-                              m, n, k);
-        default:
-            EXCEPTION_UNSUPPORTED_DATATYPE(out->dtype());
-        }
+        return cpu::linear(out, in, weight, bias);
     }
 
     llaisys::core::context().setDevice(out->deviceType(), out->deviceId());
 
     switch (out->deviceType()) {
     case LLAISYS_DEVICE_CPU:
-        {
-            size_t m = out->shape()[0];
-            size_t n = out->shape()[1];
-            size_t k = in->shape()[1];
-            switch (out->dtype()) {
-            case LLAISYS_DTYPE_F32:
-                return linear_cpu(reinterpret_cast<float *>(out->data()),
-                                  reinterpret_cast<const float *>(in->data()),
-                                  reinterpret_cast<const float *>(weight->data()),
-                                  bias ? reinterpret_cast<const float *>(bias->data()) : nullptr,
-                                  m, n, k);
-            case LLAISYS_DTYPE_F16:
-                return linear_cpu(reinterpret_cast<fp16_t *>(out->data()),
-                                  reinterpret_cast<const fp16_t *>(in->data()),
-                                  reinterpret_cast<const fp16_t *>(weight->data()),
-                                  bias ? reinterpret_cast<const fp16_t *>(bias->data()) : nullptr,
-                                  m, n, k);
-            case LLAISYS_DTYPE_BF16:
-                return linear_cpu(reinterpret_cast<bf16_t *>(out->data()),
-                                  reinterpret_cast<const bf16_t *>(in->data()),
-                                  reinterpret_cast<const bf16_t *>(weight->data()),
-                                  bias ? reinterpret_cast<const bf16_t *>(bias->data()) : nullptr,
-                                  m, n, k);
-            default:
-                EXCEPTION_UNSUPPORTED_DATATYPE(out->dtype());
-            }
-        }
+        return cpu::linear(out, in, weight, bias);
 #ifdef ENABLE_NVIDIA_API
     case LLAISYS_DEVICE_NVIDIA:
-        TO_BE_IMPLEMENTED();
+        return nvidia::linear(out, in, weight, bias);
         return;
 #endif
     default:

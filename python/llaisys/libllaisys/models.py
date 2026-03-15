@@ -18,6 +18,7 @@ class LlaisysQwen2Meta(Structure):
         ("voc", c_size_t),
         ("epsilon", c_float),
         ("theta", c_float),
+        ("use_qk_norm", c_int),
         ("end_token", c_int64),
     ]
 
@@ -34,6 +35,8 @@ class LlaisysQwen2Weights(Structure):
         ("attn_k_b", POINTER(llaisysTensor_t)),
         ("attn_v_w", POINTER(llaisysTensor_t)),
         ("attn_v_b", POINTER(llaisysTensor_t)),
+        ("attn_q_norm_w", POINTER(llaisysTensor_t)),
+        ("attn_k_norm_w", POINTER(llaisysTensor_t)),
         ("attn_o_w", POINTER(llaisysTensor_t)),
         ("mlp_norm_w", POINTER(llaisysTensor_t)),
         ("mlp_gate_w", POINTER(llaisysTensor_t)),
@@ -62,3 +65,14 @@ def load_models(lib):
 
     lib.llaisysQwen2ModelInfer.argtypes = [llaisysQwen2Model_t, POINTER(c_int64), c_size_t]
     lib.llaisysQwen2ModelInfer.restype = c_int64
+
+    lib.llaisysQwen2ModelInferSample.argtypes = [
+        llaisysQwen2Model_t,
+        POINTER(c_int64),
+        c_size_t,
+        c_float,
+        c_int,
+        c_float,
+        ctypes.c_ulonglong,
+    ]
+    lib.llaisysQwen2ModelInferSample.restype = c_int64

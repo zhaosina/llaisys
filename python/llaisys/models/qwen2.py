@@ -2,6 +2,7 @@ from typing import Sequence
 from pathlib import Path
 import json
 import re
+import random
 
 import numpy as np
 import safetensors
@@ -53,6 +54,7 @@ class Qwen2:
         hs = int(config["hidden_size"])
         nh = int(config["num_attention_heads"])
         nkvh = int(config.get("num_key_value_heads", nh))
+        dh = int(config.get("head_dim", hs // nh))
         di = int(config["intermediate_size"])
         maxseq = int(config.get("max_position_embeddings", 2048))
         voc = int(config["vocab_size"])
@@ -70,13 +72,24 @@ class Qwen2:
         meta.hs = hs
         meta.nh = nh
         meta.nkvh = nkvh
-        meta.dh = hs // nh
+        meta.dh = dh
         meta.di = di
         meta.maxseq = maxseq
         meta.voc = voc
         meta.epsilon = epsilon
         meta.theta = theta
+        meta.use_qk_norm = 0
         meta.end_token = end_token
+
+        layer_re = re.compile(r"model\.layers\.(\d+)\.(.+)")
+        for file in sorted(model_path.glob("*.safetensors")):
+            data_ = safetensors.safe_open(file, framework="pt", device="cpu")
+            if any(
+                name.endswith("self_attn.q_norm.weight") or name.endswith("self_attn.k_norm.weight")
+                for name in data_.keys()
+            ):
+                meta.use_qk_norm = 1
+                break
 
         device_ids = (c_int * 1)(0)
         self._model = LIB_LLAISYS.llaisysQwen2ModelCreate(
@@ -97,6 +110,14 @@ class Qwen2:
         self._attn_k_b = [Tensor(tensor=self._weights.attn_k_b[i], owning=False) for i in range(nlayer)]
         self._attn_v_w = [Tensor(tensor=self._weights.attn_v_w[i], owning=False) for i in range(nlayer)]
         self._attn_v_b = [Tensor(tensor=self._weights.attn_v_b[i], owning=False) for i in range(nlayer)]
+        self._attn_q_norm_w = [
+            Tensor(tensor=self._weights.attn_q_norm_w[i], owning=False) if self._weights.attn_q_norm_w[i] else None
+            for i in range(nlayer)
+        ]
+        self._attn_k_norm_w = [
+            Tensor(tensor=self._weights.attn_k_norm_w[i], owning=False) if self._weights.attn_k_norm_w[i] else None
+            for i in range(nlayer)
+        ]
         self._attn_o_w = [Tensor(tensor=self._weights.attn_o_w[i], owning=False) for i in range(nlayer)]
         self._mlp_norm_w = [Tensor(tensor=self._weights.mlp_norm_w[i], owning=False) for i in range(nlayer)]
         self._mlp_gate_w = [Tensor(tensor=self._weights.mlp_gate_w[i], owning=False) for i in range(nlayer)]
@@ -110,7 +131,6 @@ class Qwen2:
             "model.norm.weight": self._out_norm_w,
         }
 
-        layer_re = re.compile(r"model\.layers\.(\d+)\.(.+)")
         np_dtype = _numpy_dtype(dtype)
         embed_cache = None
         out_embed_loaded = False
@@ -146,6 +166,10 @@ class Qwen2:
                             target = self._attn_v_w[idx]
                         elif suffix == "self_attn.v_proj.bias":
                             target = self._attn_v_b[idx]
+                        elif suffix == "self_attn.q_norm.weight":
+                            target = self._attn_q_norm_w[idx]
+                        elif suffix == "self_attn.k_norm.weight":
+                            target = self._attn_k_norm_w[idx]
                         elif suffix == "self_attn.o_proj.weight":
                             target = self._attn_o_w[idx]
                         elif suffix == "post_attention_layernorm.weight":
@@ -199,16 +223,55 @@ class Qwen2:
         top_k: int = 1,
         top_p: float = 0.8,
         temperature: float = 0.8,
+        seed: int | None = None,
     ):
         if max_new_tokens is None:
             max_new_tokens = 128
         tokens = list(int(t) for t in inputs)
+        for next_id in self.generate_stream(
+            tokens,
+            max_new_tokens=max_new_tokens,
+            top_k=top_k,
+            top_p=top_p,
+            temperature=temperature,
+            seed=seed,
+        ):
+            tokens.append(next_id)
+        return tokens
+
+    def generate_stream(
+        self,
+        inputs: Sequence[int],
+        max_new_tokens: int = None,
+        top_k: int = 1,
+        top_p: float = 0.8,
+        temperature: float = 0.8,
+        seed: int | None = None,
+    ):
+        if max_new_tokens is None:
+            max_new_tokens = 128
+        tokens = list(int(t) for t in inputs)
+        rng = random.Random(seed)
+        do_sample = temperature > 0.0 and (top_k != 1 or top_p < 1.0)
         for _ in range(max_new_tokens):
             arr = (c_int64 * len(tokens))(*tokens)
-            next_id = int(
-                LIB_LLAISYS.llaisysQwen2ModelInfer(self._model, arr, c_size_t(len(tokens)))
-            )
+            if do_sample:
+                next_id = int(
+                    LIB_LLAISYS.llaisysQwen2ModelInferSample(
+                        self._model,
+                        arr,
+                        c_size_t(len(tokens)),
+                        temperature,
+                        int(top_k),
+                        top_p,
+                        rng.getrandbits(64),
+                    )
+                )
+            else:
+                next_id = int(
+                    LIB_LLAISYS.llaisysQwen2ModelInfer(self._model, arr, c_size_t(len(tokens)))
+                )
             tokens.append(next_id)
+            yield next_id
             if self._end_token >= 0 and next_id == self._end_token:
                 break
-        return tokens

@@ -160,7 +160,7 @@ def check_equal(
     return False
 
 
-def benchmark(torch_func, llaisys_func, device_name, warmup=10, repeat=100):
+def benchmark(torch_func, llaisys_func, device_name, warmup=10, repeat=100, old_llaisys_ms=None):
     api = llaisys.RuntimeAPI(llaisys_device(device_name))
 
     def time_op(func):
@@ -178,8 +178,20 @@ def benchmark(torch_func, llaisys_func, device_name, warmup=10, repeat=100):
 
     torch_time = time_op(torch_func)
     llaisys_time = time_op(llaisys_func)
+    ratio_vs_torch = float("inf") if torch_time == 0 else llaisys_time / torch_time
+    speedup_vs_old = None
+    if old_llaisys_ms is not None and llaisys_time > 0:
+        speedup_vs_old = (old_llaisys_ms / 1000.0) / llaisys_time
+    speedup_line = (
+        f"        speedup_vs_old: {speedup_vs_old:.5f}x"
+        if speedup_vs_old is not None
+        else "        speedup_vs_old: N/A (record baseline before rebuild)"
+    )
     print(
-        f"        Torch time: {torch_time*1000:.5f} ms \n        LLAISYS time: {llaisys_time*1000:.5f} ms"
+        f"        Torch time: {torch_time*1000:.5f} ms\n"
+        f"        LLAISYS time: {llaisys_time*1000:.5f} ms\n"
+        f"{speedup_line}\n"
+        f"        ratio_vs_torch: {ratio_vs_torch:.5f}x"
     )
 
 

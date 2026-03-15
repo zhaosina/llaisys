@@ -8,6 +8,7 @@ __C {
         llaisysDataType_t dtype;
         size_t nlayer, hs, nh, nkvh, dh, di, maxseq, voc;
         float epsilon, theta;
+        int use_qk_norm;
         int64_t end_token;
     };
 
@@ -22,6 +23,8 @@ __C {
         llaisysTensor_t *attn_k_b;
         llaisysTensor_t *attn_v_w;
         llaisysTensor_t *attn_v_b;
+        llaisysTensor_t *attn_q_norm_w;
+        llaisysTensor_t *attn_k_norm_w;
         llaisysTensor_t *attn_o_w;
         llaisysTensor_t *mlp_norm_w; // a.k.a. post_attention_layernorm.weight
         llaisysTensor_t *mlp_gate_w;
@@ -38,5 +41,13 @@ __C {
     __export struct LlaisysQwen2Weights *llaisysQwen2ModelWeights(struct LlaisysQwen2Model * model);
 
     __export int64_t llaisysQwen2ModelInfer(struct LlaisysQwen2Model * model, int64_t * token_ids, size_t ntoken);
+    __export int64_t llaisysQwen2ModelInferSample(
+        struct LlaisysQwen2Model *model,
+        int64_t *token_ids,
+        size_t ntoken,
+        float temperature,
+        int top_k,
+        float top_p,
+        unsigned long long seed);
 }
 #endif // LLAISYS_MODELS_QWEN2_H

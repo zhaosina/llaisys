@@ -326,6 +326,10 @@ tensor_t Tensor::slice(size_t dim, size_t start, size_t end) const {
 
 void Tensor::load(const void *src_) {
     core::context().setDevice(this->deviceType(), this->deviceId());
+    {
+        std::lock_guard<std::mutex> lock(_packed_linear_mutex);
+        _packed_linear_f32.reset();
+    }
     size_t bytes = this->numel() * this->elementSize();
     if (_storage->isHost()) {
         core::context().runtime().api()->memcpy_sync(
@@ -340,6 +344,34 @@ void Tensor::load(const void *src_) {
             bytes,
             LLAISYS_MEMCPY_H2D);
     }
+}
+
+const float *Tensor::getOrCreatePackedLinearF32() const {
+    CHECK_ARGUMENT(this->deviceType() == LLAISYS_DEVICE_CPU, "packed cache only supports CPU tensors");
+    CHECK_ARGUMENT(this->isContiguous(), "packed cache requires contiguous tensors");
+    CHECK_ARGUMENT(this->ndim() == 2, "packed cache requires 2D tensors");
+    CHECK_ARGUMENT(
+        this->dtype() == LLAISYS_DTYPE_F16 || this->dtype() == LLAISYS_DTYPE_BF16,
+        "packed cache only supports f16/bf16 tensors");
+
+    std::lock_guard<std::mutex> lock(_packed_linear_mutex);
+    if (_packed_linear_f32 == nullptr) {
+        auto packed = std::make_shared<std::vector<float>>(this->numel());
+        if (this->dtype() == LLAISYS_DTYPE_F16) {
+            const auto *src = reinterpret_cast<const fp16_t *>(this->data());
+            for (size_t i = 0; i < this->numel(); i++) {
+                (*packed)[i] = utils::cast<float>(src[i]);
+            }
+        } else {
+            const auto *src = reinterpret_cast<const bf16_t *>(this->data());
+            for (size_t i = 0; i < this->numel(); i++) {
+                (*packed)[i] = utils::cast<float>(src[i]);
+            }
+        }
+        _packed_linear_f32 = std::move(packed);
+    }
+
+    return _packed_linear_f32->data();
 }
 
 tensor_t Tensor::contiguous() const {

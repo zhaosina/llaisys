@@ -22,8 +22,11 @@ def test_op_linear(
     rtol=1e-5,
     device_name="cpu",
     profile=False,
+    case_name=None,
+    old_llaisys_ms=None,
 ):
-    print(f"   out {out_shape}, x {x_shape}, w {w_shape}, bias {use_bias}, dtype <{dtype_name}>")
+    prefix = f"{case_name}: " if case_name else ""
+    print(f"   {prefix}out {out_shape}, x {x_shape}, w {w_shape}, bias {use_bias}, dtype <{dtype_name}>")
     x, x_ = random_tensor(x_shape, dtype_name, device_name, scale=0.1)
     w, w_ = random_tensor(w_shape, dtype_name, device_name, scale=0.01)
 
@@ -42,6 +45,7 @@ def test_op_linear(
             lambda: torch_linear(out, x, w, bias),
             lambda: llaisys.Ops.linear(out_, x_, w_, bias_),
             device_name,
+            old_llaisys_ms=old_llaisys_ms,
         )
 
 
@@ -52,9 +56,15 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cpu", choices=["cpu", "nvidia"], type=str)
     parser.add_argument("--profile", action="store_true")
     args = parser.parse_args()
-    testShapes = [
-        ((2, 3), (2, 4), (3, 4), True),
-        ((512, 4096), (512, 4096), (4096, 4096), True),
+    smoke_cases = [
+        ("smoke-bias", ((2, 3), (2, 4), (3, 4), True), None),
+        ("smoke-nobias", ((2, 3), (2, 4), (3, 4), False), None),
+        ("throughput-large", ((512, 4096), (512, 4096), (4096, 4096), True), None),
+    ]
+    profile_cases = [
+        ("decode-small-bias", ((1, 4096), (1, 4096), (4096, 4096), True), None),
+        ("decode-small-nobias", ((1, 4096), (1, 4096), (4096, 4096), False), None),
+        ("throughput-large", ((512, 4096), (512, 4096), (4096, 4096), True), None),
     ]
     testDtypePrec = [
         # type, atol, rtol
@@ -62,9 +72,19 @@ if __name__ == "__main__":
         ("f16", 1e-3, 1e-3),
         ("bf16", 1e-2, 1e-2),
     ]
+    test_cases = profile_cases if args.profile else smoke_cases
     print(f"Testing Ops.linear on {args.device}")
-    for shapes in testShapes:
+    for case_name, shapes, old_llaisys_ms in test_cases:
         for dtype_name, atol, rtol in testDtypePrec:
-            test_op_linear(*shapes, dtype_name, atol, rtol, args.device, args.profile)
+            test_op_linear(
+                *shapes,
+                dtype_name,
+                atol,
+                rtol,
+                args.device,
+                args.profile,
+                case_name=case_name,
+                old_llaisys_ms=old_llaisys_ms,
+            )
 
     print("\033[92mTest passed!\033[0m\n")

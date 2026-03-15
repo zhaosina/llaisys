@@ -2,6 +2,9 @@
 
 #include "../../core/llaisys_core.hpp"
 #include "../../utils.hpp"
+#ifdef ENABLE_NVIDIA_API
+#include "nvidia/swiglu_nvidia.cuh"
+#endif
 
 #include <cmath>
 
@@ -64,7 +67,7 @@ void swiglu(tensor_t out, tensor_t gate, tensor_t up) {
         }
 #ifdef ENABLE_NVIDIA_API
     case LLAISYS_DEVICE_NVIDIA:
-        TO_BE_IMPLEMENTED();
+        return nvidia::swiglu(out, gate, up);
         return;
 #endif
     default:

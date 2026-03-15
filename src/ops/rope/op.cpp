@@ -2,6 +2,9 @@
 
 #include "../../core/llaisys_core.hpp"
 #include "../../utils.hpp"
+#ifdef ENABLE_NVIDIA_API
+#include "nvidia/rope_nvidia.cuh"
+#endif
 
 #include <cmath>
 #include <vector>
@@ -84,7 +87,7 @@ void rope(tensor_t out, tensor_t in, tensor_t pos_ids, float theta) {
         }
 #ifdef ENABLE_NVIDIA_API
     case LLAISYS_DEVICE_NVIDIA:
-        TO_BE_IMPLEMENTED();
+        return nvidia::rope(out, in, pos_ids, theta);
         return;
 #endif
     default:

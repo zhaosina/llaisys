@@ -2,6 +2,9 @@
 
 #include "../../core/llaisys_core.hpp"
 #include "../../utils.hpp"
+#ifdef ENABLE_NVIDIA_API
+#include "nvidia/self_attention_nvidia.cuh"
+#endif
 
 #include <cmath>
 #include <limits>
@@ -148,7 +151,7 @@ void self_attention(tensor_t attn_val, tensor_t q, tensor_t k, tensor_t v, float
         }
 #ifdef ENABLE_NVIDIA_API
     case LLAISYS_DEVICE_NVIDIA:
-        TO_BE_IMPLEMENTED();
+        return nvidia::self_attention(attn_val, q, k, v, scale);
         return;
 #endif
     default:
